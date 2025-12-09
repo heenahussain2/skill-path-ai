@@ -1,0 +1,5 @@
+{
+  "name": "SkillPath AI",
+  "description": "A personalized learning plan generator that breaks topics down into daily actionable steps, tracks progress on a calendar, and allows for AI-assisted plan refinement.",
+  "requestFramePermissions": []
+}
