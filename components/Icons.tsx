@@ -1,5 +1,6 @@
 import React from 'react';
 import { 
+  ArrowRightLeft,
   BookOpen, 
   BrainCircuit,
   Calendar as CalendarIcon, 
@@ -11,6 +12,7 @@ import {
   Clock,
   ExternalLink,
   FileText, 
+  FileUp,
   HelpCircle,
   Layout, 
   MessageSquare, 
@@ -23,11 +25,13 @@ import {
   Square,
   Timer,
   Trash2, 
+  Upload,
   Video,
   X
 } from 'lucide-react';
 
 export const Icons = {
+  ArrowRightLeft,
   BookOpen,
   BrainCircuit,
   Calendar: CalendarIcon,
@@ -39,6 +43,7 @@ export const Icons = {
   Clock,
   ExternalLink,
   FileText,
+  FileUp,
   HelpCircle,
   Layout,
   MessageSquare,
@@ -51,6 +56,7 @@ export const Icons = {
   Square,
   Timer,
   Trash2,
+  Upload,
   Video,
   X
 };

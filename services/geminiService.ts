@@ -82,7 +82,7 @@ export async function generateLearningPlan(topic: string, days: number, timePerD
 
   try {
     const response = await ai.models.generateContent({
-      model: 'gemini-2.5-flash',
+      model: 'gemini-3-pro-preview',
       contents: prompt,
       config: {
         systemInstruction: SYSTEM_INSTRUCTION,
@@ -230,4 +230,99 @@ export async function generateQuiz(context: string, numQuestions: number = 5): P
     console.error("Gemini Quiz Error:", error);
     throw error;
   }
+}
+
+export interface AnalyzedPlanResult {
+    original: Omit<LearningPlan, 'id' | 'startDate' | 'lastUpdated'>;
+    improved: Omit<LearningPlan, 'id' | 'startDate' | 'lastUpdated'>;
+    analysis: string;
+}
+
+export async function analyzeUploadedPlan(markdownContent: string): Promise<AnalyzedPlanResult> {
+    const prompt = `
+      You are an expert curriculum analyzer.
+      A user has uploaded a learning plan in Markdown format.
+      
+      MARKDOWN CONTENT:
+      """
+      ${markdownContent}
+      """
+      
+      YOUR TASK:
+      1. **Parse**: Extract the plan into a structured JSON format. This is the "original" plan. Even if the markdown is vague, capture it faithfully.
+      2. **Think & Analyze**: Identify inconsistencies, gaps in logic, unrealistic timelines, outdated information, or lack of actionable steps.
+      3. **Improve**: Create an "improved" version of the plan that fixes the identified issues. 
+         - Ensure it has clear, actionable steps.
+         - Ensure it has valid resources (use Google Search to find real URLs).
+      4. **Summarize**: Provide a concise analysis of what was wrong and what you fixed.
+      
+      OUTPUT FORMAT (JSON ONLY):
+      {
+        "original": {
+           "topic": "Topic Name",
+           "durationDays": 5,
+           "dailyTime": "30 mins",
+           "days": [ ... ]
+        },
+        "improved": {
+           "topic": "Topic Name",
+           "durationDays": 5,
+           "dailyTime": "30 mins",
+           "days": [ ... ] 
+        },
+        "analysis": "Bulleted summary of issues found and improvements made."
+      }
+      
+      NOTE: 
+      - The 'days' array structure must match this schema: { dayNumber: number, title: string, description: string, tasks: [{ text: string, resources: [{ title: string, url: string, type: string }] }] }
+      - Use 'thinkingConfig' to reason about the plan quality before generating the output.
+    `;
+    
+    try {
+        const response = await ai.models.generateContent({
+            model: 'gemini-3-pro-preview',
+            contents: prompt,
+            config: {
+                thinkingConfig: { thinkingBudget: 4096 },
+                tools: [{ googleSearch: {} }],
+            }
+        });
+        
+        const text = response.text;
+        if (!text) throw new Error("No response from Gemini");
+        
+        const data = extractJson(text);
+        
+        // Helper to format days to ensure they match internal types
+        const formatPlan = (planData: any) => {
+            const days = (planData.days || []).map((d: any) => ({
+                dayNumber: d.dayNumber,
+                title: d.title || `Day ${d.dayNumber}`,
+                description: d.description || "",
+                tasks: (d.tasks || []).map((t: any, idx: number) => ({
+                    id: `task-${d.dayNumber}-${idx}`,
+                    text: typeof t === 'string' ? t : t.text,
+                    isCompleted: false,
+                    resources: typeof t === 'object' && t.resources ? t.resources : []
+                }))
+            }));
+            
+            return {
+                topic: planData.topic || "Imported Plan",
+                durationDays: planData.durationDays || days.length,
+                dailyTime: planData.dailyTime || "Flexible",
+                days
+            };
+        };
+
+        return {
+            original: formatPlan(data.original),
+            improved: formatPlan(data.improved),
+            analysis: data.analysis
+        };
+
+    } catch (error) {
+        console.error("Gemini Analysis Error:", error);
+        throw error;
+    }
 }

@@ -11,6 +11,9 @@ interface PlanDetailProps {
   onToggleTask: (dayNumber: number, taskId: string) => void;
   onUpdateNotes: (dayNumber: number, notes: string) => void;
   onToggleSession: (dayNumber: number) => void;
+  onSelectDay: (day: DayPlan) => void;
+  onAddResource: (dayNumber: number, taskId: string, resource: Resource) => void;
+  onRemoveResource: (dayNumber: number, taskId: string, index: number) => void;
 }
 
 const SimpleMarkdown: React.FC<{ text: string }> = ({ text }) => {
@@ -77,19 +80,39 @@ const SimpleMarkdown: React.FC<{ text: string }> = ({ text }) => {
 
 const TaskItem: React.FC<{ 
   task: Task, 
-  onToggle: (id: string) => void 
-}> = ({ task, onToggle }) => {
+  onToggle: (id: string) => void,
+  onAddResource: (resource: Resource) => void,
+  onRemoveResource: (index: number) => void
+}> = ({ task, onToggle, onAddResource, onRemoveResource }) => {
   const [isExpanded, setIsExpanded] = useState(false);
+  const [isAdding, setIsAdding] = useState(false);
+  const [newTitle, setNewTitle] = useState('');
+  const [newUrl, setNewUrl] = useState('');
+  const [newType, setNewType] = useState<Resource['type']>('other');
+
   const hasResources = task.resources && task.resources.length > 0;
+
+  const handleAdd = () => {
+    if (!newTitle.trim() || !newUrl.trim()) return;
+    onAddResource({
+        title: newTitle,
+        url: newUrl,
+        type: newType
+    });
+    setNewTitle('');
+    setNewUrl('');
+    setNewType('other');
+    setIsAdding(false);
+  };
 
   return (
     <div className={`
-      mb-2 rounded-lg border transition-all overflow-hidden
+      mb-2 rounded-lg border transition-all overflow-hidden group
       ${task.isCompleted ? 'bg-emerald-50 border-emerald-200' : 'bg-white border-gray-200'}
     `}>
       <div 
         className="flex items-start gap-3 p-3 cursor-pointer hover:bg-gray-50/50"
-        onClick={() => hasResources ? setIsExpanded(!isExpanded) : onToggle(task.id)}
+        onClick={() => onToggle(task.id)}
       >
          <div 
           onClick={(e) => { e.stopPropagation(); onToggle(task.id); }}
@@ -109,42 +132,103 @@ const TaskItem: React.FC<{
           </span>
         </div>
 
-        {hasResources && (
-          <button 
+        <button 
             onClick={(e) => { e.stopPropagation(); setIsExpanded(!isExpanded); }}
-            className="text-gray-400 hover:text-indigo-600 transition-colors"
-          >
-            {isExpanded ? <Icons.ChevronUp size={16} /> : <Icons.ChevronDown size={16} />}
-          </button>
-        )}
+            className={`transition-colors p-1 rounded hover:bg-gray-100 ${hasResources ? 'text-indigo-500' : 'text-gray-300 hover:text-indigo-400'}`}
+            title={hasResources ? "View resources" : "Add resources"}
+        >
+            {isExpanded ? <Icons.ChevronUp size={16} /> : (hasResources ? <Icons.ChevronDown size={16} /> : <Icons.Plus size={16} className="opacity-0 group-hover:opacity-100" />)}
+        </button>
       </div>
 
-      {isExpanded && hasResources && (
+      {isExpanded && (
         <div className="bg-gray-50/80 px-4 pb-3 pt-0 border-t border-gray-100/50">
           <div className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2 mt-2 flex items-center gap-1">
-             <Icons.BookOpen size={10} /> Suggested Resources
+             <Icons.BookOpen size={10} /> Resources
           </div>
-          <div className="space-y-2">
+          
+          <div className="space-y-2 mb-3">
             {task.resources?.map((res, idx) => (
-              <a 
-                key={idx}
-                href={res.url}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="flex items-center gap-2 p-2 rounded-md bg-white border border-gray-200 hover:border-indigo-300 hover:shadow-sm transition-all group"
-              >
-                <div className="text-indigo-500">
-                  {res.type === 'video' ? <Icons.Video size={14} /> : 
-                   res.type === 'documentation' ? <Icons.FileText size={14} /> : 
-                   <Icons.ExternalLink size={14} />}
-                </div>
-                <span className="text-xs text-gray-700 font-medium truncate flex-1 group-hover:text-indigo-700">
-                  {res.title}
-                </span>
-                <Icons.ExternalLink size={10} className="text-gray-300 group-hover:text-indigo-400" />
-              </a>
+              <div key={idx} className="flex items-center gap-2 group/res">
+                <a 
+                    href={res.url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="flex-1 flex items-center gap-2 p-2 rounded-md bg-white border border-gray-200 hover:border-indigo-300 hover:shadow-sm transition-all"
+                >
+                    <div className="text-indigo-500">
+                    {res.type === 'video' ? <Icons.Video size={14} /> : 
+                    res.type === 'documentation' ? <Icons.FileText size={14} /> : 
+                    <Icons.ExternalLink size={14} />}
+                    </div>
+                    <span className="text-xs text-gray-700 font-medium truncate flex-1 hover:text-indigo-700">
+                    {res.title}
+                    </span>
+                    <Icons.ExternalLink size={10} className="text-gray-300" />
+                </a>
+                <button 
+                    onClick={() => onRemoveResource(idx)}
+                    className="p-2 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-md opacity-0 group-hover/res:opacity-100 transition-all"
+                    title="Remove resource"
+                >
+                    <Icons.Trash2 size={14} />
+                </button>
+              </div>
             ))}
           </div>
+
+          {isAdding ? (
+              <div className="bg-white p-3 rounded-md border border-indigo-100 shadow-sm animate-in fade-in zoom-in-95">
+                  <div className="space-y-2">
+                      <input 
+                        type="text" 
+                        value={newTitle} 
+                        onChange={e => setNewTitle(e.target.value)}
+                        placeholder="Resource Title"
+                        className="w-full text-xs p-2 border border-gray-200 rounded focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500 outline-none"
+                      />
+                      <input 
+                        type="text" 
+                        value={newUrl} 
+                        onChange={e => setNewUrl(e.target.value)}
+                        placeholder="URL (https://...)"
+                        className="w-full text-xs p-2 border border-gray-200 rounded focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500 outline-none"
+                      />
+                      <select 
+                        value={newType} 
+                        onChange={e => setNewType(e.target.value as any)}
+                        className="w-full text-xs p-2 border border-gray-200 rounded focus:ring-1 focus:ring-indigo-500 outline-none bg-white"
+                      >
+                          <option value="other">Other</option>
+                          <option value="video">Video</option>
+                          <option value="blog">Article/Blog</option>
+                          <option value="documentation">Documentation</option>
+                      </select>
+                      <div className="flex gap-2 pt-1">
+                          <button 
+                            onClick={handleAdd}
+                            disabled={!newTitle || !newUrl}
+                            className="flex-1 py-1 bg-indigo-600 text-white text-xs rounded hover:bg-indigo-700 disabled:opacity-50"
+                          >
+                              Add
+                          </button>
+                          <button 
+                            onClick={() => setIsAdding(false)}
+                            className="flex-1 py-1 bg-gray-100 text-gray-600 text-xs rounded hover:bg-gray-200"
+                          >
+                              Cancel
+                          </button>
+                      </div>
+                  </div>
+              </div>
+          ) : (
+             <button 
+                onClick={() => setIsAdding(true)}
+                className="flex items-center gap-1.5 text-xs text-indigo-600 hover:text-indigo-800 font-medium px-1 py-1 rounded hover:bg-indigo-50 transition-colors"
+             >
+                 <Icons.Plus size={12} /> Add Resource
+             </button>
+          )}
         </div>
       )}
     </div>
@@ -158,7 +242,10 @@ export const PlanDetail: React.FC<PlanDetailProps> = ({
   onClose, 
   onToggleTask,
   onUpdateNotes,
-  onToggleSession
+  onToggleSession,
+  onSelectDay,
+  onAddResource,
+  onRemoveResource
 }) => {
   const [notesInput, setNotesInput] = useState('');
   const [elapsed, setElapsed] = useState(0);
@@ -210,6 +297,18 @@ export const PlanDetail: React.FC<PlanDetailProps> = ({
       }
   };
 
+  const handlePrevDay = () => {
+    if (!day) return;
+    const prevDay = plan.days.find(d => d.dayNumber === day.dayNumber - 1);
+    if (prevDay) onSelectDay(prevDay);
+  };
+
+  const handleNextDay = () => {
+    if (!day) return;
+    const nextDay = plan.days.find(d => d.dayNumber === day.dayNumber + 1);
+    if (nextDay) onSelectDay(nextDay);
+  };
+
   const isSessionRunning = day?.sessions && day.sessions.length > 0 && day.sessions[day.sessions.length - 1].end === null;
 
   const formatTime = (ms: number) => {
@@ -238,9 +337,27 @@ export const PlanDetail: React.FC<PlanDetailProps> = ({
             
             {day ? (
                 <div className="p-6">
-                    <div className="flex items-center justify-between mb-2">
-                        <div className="flex items-center gap-2 text-indigo-600 font-semibold text-sm uppercase tracking-wide">
-                            Day {day.dayNumber}
+                    <div className="flex items-center justify-between mb-6">
+                        <div className="flex items-center bg-white border border-gray-200 rounded-lg p-1 shadow-sm">
+                            <button
+                                onClick={handlePrevDay}
+                                disabled={day.dayNumber <= 1}
+                                className="p-1.5 rounded-md text-gray-500 hover:bg-gray-100 disabled:opacity-30 disabled:hover:bg-transparent transition-all"
+                                title="Previous Day"
+                            >
+                                <Icons.ChevronLeft size={16} />
+                            </button>
+                            <span className="px-3 text-sm font-bold text-indigo-700 min-w-[60px] text-center uppercase tracking-wide">
+                                Day {day.dayNumber}
+                            </span>
+                            <button
+                                onClick={handleNextDay}
+                                disabled={day.dayNumber >= plan.days.length}
+                                className="p-1.5 rounded-md text-gray-500 hover:bg-gray-100 disabled:opacity-30 disabled:hover:bg-transparent transition-all"
+                                title="Next Day"
+                            >
+                                <Icons.ChevronRight size={16} />
+                            </button>
                         </div>
                         <button
                             onClick={() => setIsQuizOpen(true)}
@@ -296,7 +413,9 @@ export const PlanDetail: React.FC<PlanDetailProps> = ({
                             <TaskItem 
                                 key={task.id} 
                                 task={task} 
-                                onToggle={(id) => onToggleTask(day.dayNumber, id)} 
+                                onToggle={(id) => onToggleTask(day.dayNumber, id)}
+                                onAddResource={(res) => onAddResource(day.dayNumber, task.id, res)}
+                                onRemoveResource={(idx) => onRemoveResource(day.dayNumber, task.id, idx)}
                             />
                             ))}
                         </div>

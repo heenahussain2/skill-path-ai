@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Icons } from './Icons';
-import { generateLearningPlan, updatePlanWithChat } from '../services/geminiService';
+import { generateLearningPlan, updatePlanWithChat, analyzeUploadedPlan, AnalyzedPlanResult } from '../services/geminiService';
 import { LearningPlan, DayPlan } from '../types';
 import { v4 as uuidv4 } from 'uuid';
 
@@ -10,18 +10,28 @@ interface PlanWizardProps {
 }
 
 export const PlanWizard: React.FC<PlanWizardProps> = ({ onPlanCreated, onCancel }) => {
-  // Form State
+  // Tabs
+  const [activeTab, setActiveTab] = useState<'create' | 'import'>('create');
+
+  // Form State (Create)
   const [topic, setTopic] = useState('');
   const [days, setDays] = useState(7);
   const [timePerDay, setTimePerDay] = useState('30 mins');
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // Import State
+  const [importFile, setImportFile] = useState<File | null>(null);
+  const [analysisResult, setAnalysisResult] = useState<AnalyzedPlanResult | null>(null);
+
   // Review & Refine State
   const [generatedPlan, setGeneratedPlan] = useState<LearningPlan | null>(null);
   const [refineInput, setRefineInput] = useState('');
   const [isRefining, setIsRefining] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
+  
+  // Ref for file input
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Scroll to bottom of list when plan updates
   useEffect(() => {
@@ -81,8 +91,53 @@ export const PlanWizard: React.FC<PlanWizardProps> = ({ onPlanCreated, onCancel 
       }
   };
 
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files && e.target.files[0]) {
+      setImportFile(e.target.files[0]);
+      setError(null);
+    }
+  };
+
+  const handleImport = async () => {
+    if (!importFile) return;
+
+    setIsLoading(true);
+    setError(null);
+
+    const reader = new FileReader();
+    reader.onload = async (e) => {
+      const text = e.target?.result as string;
+      try {
+        const result = await analyzeUploadedPlan(text);
+        setAnalysisResult(result);
+      } catch (err: any) {
+        setError(err.message || "Failed to analyze plan. Please check the file format.");
+      } finally {
+        setIsLoading(false);
+      }
+    };
+    reader.readAsText(importFile);
+  };
+
+  const applyAnalyzedPlan = (useImproved: boolean) => {
+      if (!analysisResult) return;
+      
+      const basePlan = useImproved ? analysisResult.improved : analysisResult.original;
+      
+      const newPlan: LearningPlan = {
+          ...basePlan,
+          id: uuidv4(),
+          startDate: new Date().toISOString(),
+          lastUpdated: new Date().toISOString()
+      };
+      
+      setGeneratedPlan(newPlan);
+      // Clear analysis result so we go to preview mode
+      setAnalysisResult(null); 
+  };
+
   // --------------------------------------------------------------------------
-  // RENDER: PREVIEW MODE
+  // RENDER: PREVIEW MODE (Shared)
   // --------------------------------------------------------------------------
   if (generatedPlan) {
     return (
@@ -175,101 +230,243 @@ export const PlanWizard: React.FC<PlanWizardProps> = ({ onPlanCreated, onCancel 
   }
 
   // --------------------------------------------------------------------------
-  // RENDER: WIZARD FORM
+  // RENDER: ANALYSIS RESULT (Import Path)
+  // --------------------------------------------------------------------------
+  if (analysisResult) {
+    return (
+        <div className="max-w-3xl w-full mx-auto bg-white rounded-xl shadow-lg p-8 border border-gray-100 animate-in fade-in duration-500">
+            <div className="flex justify-between items-center mb-6">
+                <h2 className="text-2xl font-bold text-gray-800 flex items-center gap-2">
+                    <Icons.BrainCircuit className="text-indigo-600" />
+                    Analysis Complete
+                </h2>
+                <button onClick={() => setAnalysisResult(null)} className="text-gray-400 hover:text-gray-600">
+                    <Icons.X size={24} />
+                </button>
+            </div>
+
+            <div className="bg-amber-50 border border-amber-200 rounded-xl p-6 mb-8">
+                <h3 className="text-amber-800 font-bold flex items-center gap-2 mb-3">
+                    <Icons.Sparkles size={18} />
+                    AI Findings
+                </h3>
+                <div className="text-amber-900/80 text-sm leading-relaxed whitespace-pre-line">
+                    {analysisResult.analysis}
+                </div>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div className="border border-gray-200 rounded-xl p-5 hover:border-indigo-300 transition-all">
+                    <div className="flex justify-between items-start mb-3">
+                        <h4 className="font-bold text-gray-800">Original Plan</h4>
+                        <span className="text-xs bg-gray-100 px-2 py-1 rounded text-gray-600">As Uploaded</span>
+                    </div>
+                    <p className="text-sm text-gray-500 mb-4">
+                        Keep the plan exactly as you wrote it, just formatted for SkillPath.
+                    </p>
+                    <button 
+                        onClick={() => applyAnalyzedPlan(false)}
+                        className="w-full py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 font-medium text-sm transition-colors"
+                    >
+                        Keep Original
+                    </button>
+                </div>
+
+                <div className="border-2 border-indigo-100 bg-indigo-50/30 rounded-xl p-5 hover:border-indigo-300 transition-all relative overflow-hidden">
+                    <div className="absolute top-0 right-0 bg-indigo-500 text-white text-[10px] font-bold px-2 py-1 rounded-bl-lg uppercase tracking-wide">
+                        Recommended
+                    </div>
+                    <div className="flex justify-between items-start mb-3">
+                        <h4 className="font-bold text-indigo-900">Improved Plan</h4>
+                        <Icons.Sparkles size={16} className="text-indigo-500" />
+                    </div>
+                    <p className="text-sm text-indigo-800/70 mb-4">
+                        Enhanced with clearer steps, better pacing, and real resources found via search.
+                    </p>
+                    <button 
+                        onClick={() => applyAnalyzedPlan(true)}
+                        className="w-full py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 font-medium text-sm transition-colors shadow-sm"
+                    >
+                        Apply Improvements
+                    </button>
+                </div>
+            </div>
+        </div>
+    );
+  }
+
+  // --------------------------------------------------------------------------
+  // RENDER: WIZARD FORM (Create & Import)
   // --------------------------------------------------------------------------
   return (
-    <div className="max-w-2xl w-full mx-auto bg-white rounded-xl shadow-lg p-8 border border-gray-100 animate-in slide-in-from-bottom-4 fade-in duration-500">
-      <div className="flex justify-between items-center mb-6">
-        <h2 className="text-2xl font-bold text-gray-800 flex items-center gap-2">
-          <Icons.Sparkles className="text-indigo-600" />
-          Create New Learning Plan
-        </h2>
-        <button onClick={onCancel} className="text-gray-400 hover:text-gray-600">
-          <Icons.X size={24} />
-        </button>
+    <div className="max-w-2xl w-full mx-auto bg-white rounded-xl shadow-lg border border-gray-100 animate-in slide-in-from-bottom-4 fade-in duration-500 overflow-hidden">
+      
+      {/* Header with Tabs */}
+      <div className="bg-gray-50 border-b border-gray-100">
+          <div className="flex">
+              <button
+                onClick={() => setActiveTab('create')}
+                className={`flex-1 py-4 text-sm font-medium text-center transition-all ${activeTab === 'create' ? 'bg-white border-t-2 border-indigo-600 text-indigo-600 font-bold' : 'text-gray-500 hover:text-gray-700'}`}
+              >
+                  Generate New
+              </button>
+              <button
+                onClick={() => setActiveTab('import')}
+                className={`flex-1 py-4 text-sm font-medium text-center transition-all ${activeTab === 'import' ? 'bg-white border-t-2 border-indigo-600 text-indigo-600 font-bold' : 'text-gray-500 hover:text-gray-700'}`}
+              >
+                  Import Markdown
+              </button>
+          </div>
       </div>
-
-      {error && (
-        <div className="mb-6 p-4 bg-red-50 text-red-700 rounded-lg text-sm border border-red-100">
-          {error}
-        </div>
-      )}
-
-      <form onSubmit={handleSubmit} className="space-y-6">
-        <div>
-          <label className="block text-sm font-medium text-gray-700 mb-2">
-            What do you want to learn?
-          </label>
-          <input
-            type="text"
-            required
-            value={topic}
-            onChange={(e) => setTopic(e.target.value)}
-            placeholder="e.g., Advanced React Patterns, Introduction to Pottery, Python for Data Science..."
-            className="w-full px-4 py-3 rounded-lg border border-gray-300 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none transition-all"
-          />
+      
+      <div className="p-8">
+        <div className="flex justify-between items-center mb-6">
+            <h2 className="text-2xl font-bold text-gray-800 flex items-center gap-2">
+            {activeTab === 'create' ? <Icons.Sparkles className="text-indigo-600" /> : <Icons.FileUp className="text-indigo-600" />}
+            {activeTab === 'create' ? 'Create New Learning Plan' : 'Import & Analyze Plan'}
+            </h2>
+            <button onClick={onCancel} className="text-gray-400 hover:text-gray-600">
+            <Icons.X size={24} />
+            </button>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">
-              Duration (Days)
-            </label>
-            <input
-              type="number"
-              min="1"
-              max="60"
-              value={days}
-              onChange={(e) => setDays(parseInt(e.target.value))}
-              className="w-full px-4 py-3 rounded-lg border border-gray-300 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none transition-all"
-            />
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">
-              Time per Day
-            </label>
-            <select
-              value={timePerDay}
-              onChange={(e) => setTimePerDay(e.target.value)}
-              className="w-full px-4 py-3 rounded-lg border border-gray-300 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none transition-all bg-white"
-            >
-              <option value="15 mins">15 mins</option>
-              <option value="30 mins">30 mins</option>
-              <option value="45 mins">45 mins</option>
-              <option value="1 hour">1 hour</option>
-              <option value="2 hours">2 hours</option>
-              <option value="3+ hours">3+ hours</option>
-            </select>
-          </div>
-        </div>
+        {error && (
+            <div className="mb-6 p-4 bg-red-50 text-red-700 rounded-lg text-sm border border-red-100">
+            {error}
+            </div>
+        )}
 
-        <div className="pt-4">
-          <button
-            type="submit"
-            disabled={isLoading}
-            className={`w-full flex items-center justify-center gap-2 py-4 rounded-lg text-white font-medium transition-all ${
-              isLoading
-                ? 'bg-indigo-400 cursor-not-allowed'
-                : 'bg-indigo-600 hover:bg-indigo-700 shadow-md hover:shadow-lg'
-            }`}
-          >
-            {isLoading ? (
-              <>
-                <div className="animate-spin rounded-full h-5 w-5 border-2 border-white border-t-transparent"></div>
-                Generating Plan with Gemini...
-              </>
-            ) : (
-              <>
-                Generate Plan
-                <Icons.ChevronRight size={20} />
-              </>
-            )}
-          </button>
-          <p className="text-center text-xs text-gray-500 mt-3">
-            Powered by Gemini 2.5 Flash with Google Search Grounding for up-to-date content.
-          </p>
-        </div>
-      </form>
+        {activeTab === 'create' ? (
+            <form onSubmit={handleSubmit} className="space-y-6">
+                <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                    What do you want to learn?
+                </label>
+                <input
+                    type="text"
+                    required
+                    value={topic}
+                    onChange={(e) => setTopic(e.target.value)}
+                    placeholder="e.g., Advanced React Patterns, Introduction to Pottery, Python for Data Science..."
+                    className="w-full px-4 py-3 rounded-lg border border-gray-300 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none transition-all"
+                />
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Duration (Days)
+                    </label>
+                    <input
+                    type="number"
+                    min="1"
+                    max="60"
+                    value={days}
+                    onChange={(e) => setDays(parseInt(e.target.value))}
+                    className="w-full px-4 py-3 rounded-lg border border-gray-300 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none transition-all"
+                    />
+                </div>
+                <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Time per Day
+                    </label>
+                    <select
+                    value={timePerDay}
+                    onChange={(e) => setTimePerDay(e.target.value)}
+                    className="w-full px-4 py-3 rounded-lg border border-gray-300 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none transition-all bg-white"
+                    >
+                    <option value="15 mins">15 mins</option>
+                    <option value="30 mins">30 mins</option>
+                    <option value="45 mins">45 mins</option>
+                    <option value="1 hour">1 hour</option>
+                    <option value="2 hours">2 hours</option>
+                    <option value="3+ hours">3+ hours</option>
+                    </select>
+                </div>
+                </div>
+
+                <div className="pt-4">
+                <button
+                    type="submit"
+                    disabled={isLoading}
+                    className={`w-full flex items-center justify-center gap-2 py-4 rounded-lg text-white font-medium transition-all ${
+                    isLoading
+                        ? 'bg-indigo-400 cursor-not-allowed'
+                        : 'bg-indigo-600 hover:bg-indigo-700 shadow-md hover:shadow-lg'
+                    }`}
+                >
+                    {isLoading ? (
+                    <>
+                        <div className="animate-spin rounded-full h-5 w-5 border-2 border-white border-t-transparent"></div>
+                        Generating Plan...
+                    </>
+                    ) : (
+                    <>
+                        Generate Plan
+                        <Icons.ChevronRight size={20} />
+                    </>
+                    )}
+                </button>
+                </div>
+            </form>
+        ) : (
+             <div className="space-y-6">
+                <div 
+                    onClick={() => fileInputRef.current?.click()}
+                    className="border-2 border-dashed border-gray-300 rounded-xl p-10 flex flex-col items-center justify-center text-center hover:border-indigo-400 hover:bg-gray-50 transition-all cursor-pointer group"
+                >
+                    <input 
+                        type="file" 
+                        accept=".md,.txt" 
+                        ref={fileInputRef}
+                        className="hidden" 
+                        onChange={handleFileChange}
+                    />
+                    <div className="bg-indigo-50 p-4 rounded-full mb-4 group-hover:scale-110 transition-transform">
+                        <Icons.Upload className="text-indigo-600" size={32} />
+                    </div>
+                    {importFile ? (
+                        <div>
+                             <p className="font-bold text-gray-800 mb-1">{importFile.name}</p>
+                             <p className="text-sm text-gray-500">{(importFile.size / 1024).toFixed(1)} KB</p>
+                        </div>
+                    ) : (
+                        <div>
+                            <p className="font-medium text-gray-800 mb-2">Click to upload Markdown file</p>
+                            <p className="text-sm text-gray-500">Supports .md or .txt files</p>
+                        </div>
+                    )}
+                </div>
+
+                 <div className="pt-4">
+                    <button
+                        onClick={handleImport}
+                        disabled={isLoading || !importFile}
+                        className={`w-full flex items-center justify-center gap-2 py-4 rounded-lg text-white font-medium transition-all ${
+                        isLoading || !importFile
+                            ? 'bg-indigo-300 cursor-not-allowed'
+                            : 'bg-indigo-600 hover:bg-indigo-700 shadow-md hover:shadow-lg'
+                        }`}
+                    >
+                        {isLoading ? (
+                        <>
+                            <div className="animate-spin rounded-full h-5 w-5 border-2 border-white border-t-transparent"></div>
+                            Analyzing with Gemini 3 Pro...
+                        </>
+                        ) : (
+                        <>
+                            Analyze Plan
+                            <Icons.BrainCircuit size={20} />
+                        </>
+                        )}
+                    </button>
+                     <p className="text-center text-xs text-gray-500 mt-3">
+                        The AI will analyze your plan for inconsistencies and suggest improvements.
+                    </p>
+                </div>
+             </div>
+        )}
+      </div>
     </div>
   );
 };

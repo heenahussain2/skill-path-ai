@@ -6,19 +6,40 @@ import { PlanDetail } from './components/PlanDetail';
 import { EditPlanModal } from './components/EditPlanModal';
 import { QuizModal } from './components/QuizModal';
 import { Icons } from './components/Icons';
-import { LearningPlan, DayPlan } from './types';
+import { LearningPlan, DayPlan, Resource } from './types';
 
 // Storage key
 const STORAGE_KEY = 'skillpath_plans_v1';
+
+// Helper to load plans synchronously for state initialization
+const loadSavedPlans = (): LearningPlan[] => {
+  if (typeof window === 'undefined') return [];
+  try {
+    const saved = localStorage.getItem(STORAGE_KEY);
+    return saved ? JSON.parse(saved) : [];
+  } catch (error) {
+    console.error("Failed to load plans", error);
+    return [];
+  }
+};
 
 // Background Images (Digital Art)
 const BG_LANDING = "url('https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?q=80&w=2564&auto=format&fit=crop')";
 const BG_PLAN = "url('https://images.unsplash.com/photo-1620641788421-7a1c342ea42e?q=80&w=2574&auto=format&fit=crop')";
 
 const App: React.FC = () => {
-  const [plans, setPlans] = useState<LearningPlan[]>([]);
-  const [activePlanId, setActivePlanId] = useState<string | null>(null);
-  const [viewMode, setViewMode] = useState<'create' | 'view'>('view');
+  // Initialize state lazily from localStorage to prevent overwriting with empty array on first render
+  const [plans, setPlans] = useState<LearningPlan[]>(loadSavedPlans);
+  
+  const [activePlanId, setActivePlanId] = useState<string | null>(() => {
+    const saved = loadSavedPlans();
+    return saved.length > 0 ? saved[0].id : null;
+  });
+
+  const [viewMode, setViewMode] = useState<'create' | 'view'>(() => {
+    const saved = loadSavedPlans();
+    return saved.length > 0 ? 'view' : 'create';
+  });
   
   // UI State
   const [selectedDay, setSelectedDay] = useState<DayPlan | null>(null);
@@ -31,31 +52,10 @@ const App: React.FC = () => {
   const [quizContext, setQuizContext] = useState('');
   const [quizTitle, setQuizTitle] = useState('');
 
-  // Load from local storage on mount
-  useEffect(() => {
-    const saved = localStorage.getItem(STORAGE_KEY);
-    if (saved) {
-      try {
-        const parsedPlans = JSON.parse(saved);
-        setPlans(parsedPlans);
-        if (parsedPlans.length > 0) {
-          setActivePlanId(parsedPlans[0].id);
-        } else {
-          setViewMode('create');
-        }
-      } catch (e) {
-        console.error("Failed to parse saved plans");
-      }
-    } else {
-        setViewMode('create');
-    }
-  }, []);
-
   // Save to local storage whenever plans change
+  // We removed the 'if (plans.length > 0)' check so that deletions (empty array) are also persisted.
   useEffect(() => {
-    if (plans.length > 0) {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(plans));
-    }
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(plans));
   }, [plans]);
 
   // Select today's day automatically when opening a plan
@@ -172,6 +172,53 @@ const App: React.FC = () => {
           }
 
           return { ...day, sessions: newSessions };
+        })
+      };
+    }));
+  };
+
+  const handleAddResource = (dayNumber: number, taskId: string, resource: Resource) => {
+    if (!activePlanId) return;
+
+    setPlans(prevPlans => prevPlans.map(plan => {
+      if (plan.id !== activePlanId) return plan;
+
+      return {
+        ...plan,
+        days: plan.days.map(day => {
+          if (day.dayNumber !== dayNumber) return day;
+          return {
+            ...day,
+            tasks: day.tasks.map(task =>
+              task.id === taskId
+                ? { ...task, resources: [...(task.resources || []), resource] }
+                : task
+            )
+          };
+        })
+      };
+    }));
+  };
+
+  const handleRemoveResource = (dayNumber: number, taskId: string, index: number) => {
+    if (!activePlanId) return;
+
+    setPlans(prevPlans => prevPlans.map(plan => {
+      if (plan.id !== activePlanId) return plan;
+
+      return {
+        ...plan,
+        days: plan.days.map(day => {
+          if (day.dayNumber !== dayNumber) return day;
+          return {
+            ...day,
+            tasks: day.tasks.map(task => {
+                if (task.id !== taskId) return task;
+                const newRes = [...(task.resources || [])];
+                newRes.splice(index, 1);
+                return { ...task, resources: newRes };
+            })
+          };
         })
       };
     }));
@@ -347,6 +394,9 @@ const App: React.FC = () => {
                 onToggleTask={handleToggleTask}
                 onUpdateNotes={handleUpdateNotes}
                 onToggleSession={handleSessionToggle}
+                onSelectDay={setSelectedDay}
+                onAddResource={handleAddResource}
+                onRemoveResource={handleRemoveResource}
               />
               
               {/* Edit Plan Modal */}
